@@ -2073,7 +2073,12 @@ class AMBF_OT_generate_ambf_file(Operator):
         sensor_yaml_name = self.add_sensor_prefix_str(sensor_obj_handle_name)
         sensor_data['name'] = sensor_obj_handle_name
         
-        # sensor_data['parent'] = sensor_obj_handle.ambf_object_parent #TODO: Fix parent not set issue
+        if sensor_obj_handle.ambf_object_parent is None:
+            sensor_data['parent'] = ''
+        else:
+            parent_obj_handle = sensor_obj_handle.ambf_object_parent
+            parent_obj_handle_name = remove_namespace_prefix(parent_obj_handle.name)
+            sensor_data['parent'] = self.add_body_prefix_str(parent_obj_handle_name)
 
         # Define location with position and orientation
         world_pos = sensor_obj_handle.matrix_world.translation
@@ -3097,7 +3102,7 @@ class AMBF_OT_launch_ambf_simulator(Operator):
             return {'CANCELLED'}
 
         try:
-            subprocess.Popen([simulator_path, '--a', adf_path])
+            subprocess.Popen([simulator_path, '-a', adf_path])
             self.report({'INFO'}, f"Launched AMBF simulator with: {adf_path}")
         except Exception as e:
             self.report({'ERROR'}, f"Failed to launch simulator: {e}")
@@ -3381,9 +3386,13 @@ class AMBF_OT_load_ambf_file(Operator):
 
         # if 'namespace' in actuator_data:
         #     actuator.ambf_actuator_namespace = actuator_data['namespace']
-        if 'parent' in actuator_data:
-            parent_obj_handle = bpy.data.objects[actuator_data['parent']]
-            actuator.ambf_object_parent = parent_obj_handle
+        if actuator_data.get('parent'):
+            parent_key = actuator_data['parent']
+            blender_name = self._blender_remapped_body_names.get(parent_key)
+            if blender_name and blender_name in bpy.data.objects:
+                actuator.ambf_object_parent = bpy.data.objects[blender_name]
+            else:
+                print(f"WARNING! Actuator '{actuator_name}' parent '{parent_key}' not found, leaving unparented")
         if 'visible' in actuator_data:
             actuator.ambf_object_visible = actuator_data['visible']
         if 'visible size' in actuator_data:
@@ -3415,9 +3424,13 @@ class AMBF_OT_load_ambf_file(Operator):
             sensor_data['location']['orientation']['y']
         )
 
-        if 'parent' in sensor_data:
-            parent_obj_handle = bpy.data.objects[sensor_data['parent']]
-            sensor.ambf_object_parent = parent_obj_handle
+        if sensor_data.get('parent'):
+            parent_key = sensor_data['parent']
+            blender_name = self._blender_remapped_body_names.get(parent_key)
+            if blender_name and blender_name in bpy.data.objects:
+                sensor.ambf_object_parent = bpy.data.objects[blender_name]
+            else:
+                print(f"WARNING! Sensor '{sensor_name}' parent '{parent_key}' not found, leaving unparented")
         if 'visible' in sensor_data:
             sensor.ambf_object_visible = sensor_data['visible']
         if 'visible size' in sensor_data:
@@ -3569,8 +3582,11 @@ class AMBF_OT_load_ambf_file(Operator):
             obj_handle.ambf_collision_margin = body_data['collision margin']
             obj_handle.ambf_collision_margin_enable = True 
         if 'collision shape' in body_data:
-            obj_handle.ambf_collision_shape = body_data['collision shape']
-            obj_handle.ambf_collision_type = 'SINGULAR_SHAPE'  
+            if len(obj_handle.ambf_collision_shape_prop_collection.items()) == 0:
+                obj_handle.ambf_collision_shape_prop_collection.add()
+            ocs = obj_handle.ambf_collision_shape_prop_collection.items()[0][1]
+            ocs.ambf_collision_shape = body_data['collision shape']
+            obj_handle.ambf_collision_type = 'SINGULAR_SHAPE'
 
         if 'collision geometry' in body_data:
             collision_geometry = body_data['collision geometry']
@@ -3592,7 +3608,6 @@ class AMBF_OT_load_ambf_file(Operator):
             add_collision_shape_property(obj_handle)
 
         ocs = obj_handle.ambf_collision_shape_prop_collection.items()[0][1]
-        ocs.ambf_collision_shape = obj_handle.ambf_collision_shape
 
         if ocs.ambf_collision_shape == 'BOX':
             if 'collision geometry' in body_data:
